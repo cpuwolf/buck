@@ -20,9 +20,10 @@
   */
 
 /* Includes ------------------------------------------------------------------*/
-#include "stm8s.h"
+#include <stm8s.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 /**
   * @addtogroup TIM1_7PWM_Output
   * @{
@@ -31,14 +32,25 @@
 /* Private typedef -----------------------------------------------------------*/
 
 /* Private define ------------------------------------------------------------*/
-#define CCR1_Val  ((uint16_t)800)
-#define MAX_Val  ((uint16_t)8095)
+#define CCR1_Val  ((uint16_t)199)
+#define MAX_Val  ((uint16_t)200)
+//#define BLUETOOTH
+
 
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
+static uint16_t tacho_count = 0;
+static uint16_t Conversion_Value;
 /* Private function prototypes -----------------------------------------------*/
 static void TIM1_Config(void);
+static void TIM3_Config(void);
+static void PWM_init(void);
 static int uart_init(uint32_t baudrate);
+static void ADC_Config();
+#ifdef BLUETOOTH
+static void bluetooth(void);
+#endif
+static void Myloop(void);
 /* Private functions ---------------------------------------------------------*/
 /* Public functions ----------------------------------------------------------*/
 
@@ -49,19 +61,42 @@ static int uart_init(uint32_t baudrate);
   */
 void main(void)
 {
+    ADC_Config();
+
+    /*heart beat led*/
     GPIO_Init(GPIOE, GPIO_PIN_5, GPIO_MODE_OUT_PP_LOW_FAST);
-    /* Toggles LED */
     GPIO_WriteLow(GPIOE, GPIO_PIN_5);
 
+    /* PC fan tacho signal */
+    GPIO_Init(GPIOD, GPIO_PIN_2, GPIO_MODE_IN_FL_IT);
+    //GPIO_ExternalPullUpConfig(GPIOD, GPIO_PIN_2, ENABLE);
+    EXTI_SetExtIntSensitivity(EXTI_PORT_GPIOD, EXTI_SENSITIVITY_FALL_ONLY);
+    EXTI_SetTLISensitivity(EXTI_TLISENSITIVITY_FALL_ONLY);
+
+    /* PWM output signal */
+    GPIO_Init(GPIOC, GPIO_PIN_1, GPIO_MODE_OUT_OD_HIZ_SLOW);
+    /* full speed */
+    GPIO_WriteLow(GPIOC, GPIO_PIN_0);
+
     uart_init(115200);
-
+#ifdef BLUETOOTH
+    bluetooth();
+#else
     printf("\nGo\n");
+#endif
+    /* PWM configuration */
+    PWM_init();
+    /* TIM3 heart beat */
+    TIM3_Config();
 
-    /* TIM1 configuration -----------------------------------------*/
-    TIM1_Config();
+    /* Enable general inUnhandled exceptionUnhandled exceptionerrupts */
+    enableInterrupts();
+
+    Myloop();
 
     while (1)
-    {}
+    {
+    }
 }
 
 static void ADC_Config()
@@ -91,82 +126,205 @@ static uint16_t ADC_Read()
         __wait_for_interrupt();
     };
     Conversion_Value = ADC1_GetConversionValue();
-    ADC1_ITConfig(ADC1_IT_EOC, DISABLE);
+    //ADC1_ITConfig(ADC1_IT_EOC, DISABLE);
     return Conversion_Value;
 }
 /**
   * @brief  Configure TIM1 to generate 7 PWM signals with 4 different duty cycles
+  * the microcontroller can vary the output voltage.
+  * In this implementation the pulse rate is 2.5KHz and the pulse width varies between zero and 170uS
+  * to give an output between zero and 12V
   * @param  None
   * @retval None
   */
 static void TIM1_Config(void)
 {
-    uint16_t ICValue;
-    uint16_t rpm;
 
     TIM1_DeInit();
 
-    /* Time Base configuration 10KHz=100us*/
-    /* gernal speed of PC fan
-       1000rpm=16.66Hz=60ms=60000us*/
     /*
-    TIM1_Period = 4095
-    TIM1_Prescaler = 1
-    TIM1_CounterMode = TIM1_COUNTERMODE_UP
-    TIM1_RepetitionCounter = 0
-    */
+       clock src 2MHz = 500ns
+       1) 500ns * 200 = 100000ns = 100us
+       2) 500ns * 2 = 1us
+       Time Base configuration 10KHz=100us
+       general speed of PC fan
+       1000rpm=16.66Hz=60ms=60000us*/
 
-    TIM1_TimeBaseInit(200-1, TIM1_COUNTERMODE_UP, MAX_Val, 0);
+    TIM1_TimeBaseInit(4-1, TIM1_COUNTERMODE_UP, MAX_Val, 0);
 
     /* Channel 1 in PWM mode */
-
-    /*
-    TIM1_OCMode = TIM1_OCMODE_PWM2
-    TIM1_OutputState = TIM1_OUTPUTSTATE_ENABLE
-    TIM1_OutputNState = TIM1_OUTPUTNSTATE_ENABLE
-    TIM1_Pulse = CCR1_Val
-    TIM1_OCPolarity = TIM1_OCPOLARITY_LOW
-    TIM1_OCNPolarity = TIM1_OCNPOLARITY_HIGH
-    TIM1_OCIdleState = TIM1_OCIDLESTATE_SET
-    TIM1_OCNIdleState = TIM1_OCIDLESTATE_RESET
-
-    */
-    TIM1_OC1Init(TIM1_OCMODE_PWM2, TIM1_OUTPUTSTATE_ENABLE, TIM1_OUTPUTNSTATE_ENABLE,
+    TIM1_OC1Init(TIM1_OCMODE_PWM1, TIM1_OUTPUTSTATE_ENABLE, TIM1_OUTPUTNSTATE_ENABLE,
                  CCR1_Val, TIM1_OCPOLARITY_LOW, TIM1_OCNPOLARITY_HIGH, TIM1_OCIDLESTATE_SET,
                  TIM1_OCNIDLESTATE_RESET);
-
-    /* Channel 2 in Capure/Compare mode */
-    TIM1_ICInit( TIM1_CHANNEL_2, TIM1_ICPOLARITY_RISING, TIM1_ICSELECTION_DIRECTTI,
+#if 0
+    /* Channel 3/4 in Capure/Compare mode */
+    TIM1_ICInit( TIM1_CHANNEL_3, TIM1_ICPOLARITY_RISING, TIM1_ICSELECTION_DIRECTTI,
                  TIM1_ICPSC_DIV1, 0x0);
 
     TIM1_SelectInputTrigger(TIM1_TS_TI2FP2);
     TIM1_SelectSlaveMode(TIM1_SLAVEMODE_RESET);
 
-
+#endif
 
     /* TIM1 counter enable */
     TIM1_Cmd(ENABLE);
+#if 1
     /* TIM1 Main Output Enable */
     TIM1_CtrlPWMOutputs(ENABLE);
 
 
-    /* Clear CC2 Flag*/
-    TIM1_ClearFlag(TIM1_FLAG_CC2);
+    /* Clear CC3 Flag*/
+    TIM1_ClearFlag(TIM1_FLAG_CC3);
+#endif
+}
 
-read_speed:
-    /* wait a capture on CC2 */
-    while((TIM1->SR1 & TIM1_FLAG_CC2) != TIM1_FLAG_CC2);
-    /* Get CCR2 value*/
-    ICValue = TIM1_GetCapture2();
-    TIM1_ClearFlag(TIM1_FLAG_CC2);
+static void PWM_init(void)
+{
+    TIM1_Config();
+}
+static void PWM_update(uint8_t percentage)
+{
+    uint16_t tim_val;
+    static uint16_t tim_val_old=0;
 
-    if(ICValue > 65535) {
-        printf("Invalid value\n");
-    } else {
-        rpm = 10000/ICValue;
-        rpm *= 60;
-        printf("[%d]rpm %d\n", ICValue, rpm);
+    /* test only */
+    tim_val = percentage;
+    tim_val = tim_val * MAX_Val /100;
+
+    /* update PWM */
+    if(tim_val != tim_val_old)
+    {
+        if(tim_val <= MAX_Val)
+        {
+            TIM1_SetCompare1(tim_val);
+            printf("pwm:%u\n", tim_val);
+            tim_val_old = tim_val;
+        }
     }
+}
+void tacho_handler(void)
+{
+    if ((GPIO_ReadInputData(GPIOD) & GPIO_PIN_2) == 0)
+    {
+        tacho_count++;
+    }
+}
+void TIM3_update(void)
+{
+    uint16_t tacho = tacho_count;
+    printf("rpm:%u adc:%u\n", tacho*10, Conversion_Value);
+    //disableInterrupts();
+    tacho_count = 0;
+    //enableInterrupts();
+    GPIO_WriteReverse(GPIOE, GPIO_PIN_5);
+    /* Cleat Interrupt Pending bit */
+    TIM3_ClearITPendingBit(TIM3_IT_UPDATE);
+}
+/* pin PD3 */
+static void TIM3_Config(void)
+{
+    TIM3_DeInit();
+    /*
+       clock src 2MHz = 500ns
+       500ns * 32768 = 16.386ms
+       16.386ms * 61 = 1000ms = 1s
+       Time Base configuration 10KHz=100us
+
+       reference general PC fan speed
+       1000rpm=16.66Hz=60ms=60000us
+    */
+    TIM3_TimeBaseInit(TIM3_PRESCALER_32768, 61*6-1);
+    /* Clear TIM3 update flag */
+    TIM3_ClearFlag(TIM3_FLAG_UPDATE);
+    /* Enable update interrupt */
+    TIM3_ITConfig(TIM3_IT_UPDATE, ENABLE);
+#if 0
+    /* Channel 1/2 in Capure/Compare mode */
+    TIM3_ICInit( TIM3_CHANNEL_1, TIM3_ICPOLARITY_RISING, TIM3_ICSELECTION_DIRECTTI,
+                 TIM3_ICPSC_DIV1, 0x0);
+    TIM3_ICInit( TIM3_CHANNEL_2, TIM3_ICPOLARITY_FALLING, TIM3_ICSELECTION_INDIRECTTI,
+                 TIM3_ICPSC_DIV1, 0x0);
+#endif
+
+    /* TIM3 counter enable */
+    TIM3_Cmd(ENABLE);
+#if 0
+    /* Clear CC3 Flag*/
+    TIM3_ClearFlag(TIM3_FLAG_CC1|TIM3_FLAG_CC2);
+#endif
+}
+
+static uint8_t ReceivedData[10];
+static uint8_t ReceivedData_idx = 0;
+static uint16_t GetString(void)
+{
+    uint16_t val;
+    char * ptr = (char *)ReceivedData;
+    val = atoi(ptr);
+    return val;
+}
+
+void uart_rx_irq(void)
+{
+    ReceivedData[ReceivedData_idx] = UART2_ReceiveData8();
+    if(ReceivedData_idx < 9)
+    {
+        ReceivedData_idx++;
+    }
+}
+static void Myloop(void)
+{
+    uint16_t rasing_value;
+    uint16_t falling_value;
+    uint16_t rpm;
+    uint16_t tim_val, tim_val_old=0;
+
+    uint8_t i;
+read_speed:
+
+    disableInterrupts();
+    if(ReceivedData_idx > 0)
+    {
+        /* scan string */
+        for(i=0; i<=ReceivedData_idx; i++)
+        {
+            if((ReceivedData[i] == '\r')
+                    || (ReceivedData[i] == '\n'))
+            {
+                ReceivedData[i] = 0;
+                if(i > 0) {
+                    tim_val = GetString();
+                }
+                ReceivedData_idx = 0;
+                /* left input will be ignored */
+                UART2_ClearFlag(UART2_FLAG_RXNE);
+                break;
+            }
+        }
+
+    }
+    enableInterrupts();
+
+    PWM_update(tim_val);
+#if 0
+    /* wait a capture on CC1, CC2 */
+    if((TIM1->SR2 & TIM1_FLAG_CC1) != TIM1_FLAG_CC1)
+    {
+        /* Get CCR1 value*/
+        rasing_value = TIM3_GetCapture1();
+        TIM3_ClearFlag(TIM3_FLAG_CC1);
+    }
+    if((TIM1->SR2 & TIM1_FLAG_CC2) != TIM1_FLAG_CC2)
+    {
+        /* Get CCR2 value*/
+        falling_value = TIM3_GetCapture2();
+        TIM3_ClearFlag(TIM3_FLAG_CC2);
+    }
+#endif
+    Conversion_Value = ADC_Read();
+
+    //if(falling_value > rasing_value)
+    //    printf("[%u]ADC 0x%x\n", falling_value - rasing_value, Conversion_Value);
 
     goto read_speed;
 
@@ -208,6 +366,8 @@ static int uart_init(uint32_t baudrate)
     UART2_DeInit();
     UART2_Init (baudrate, UART2_WORDLENGTH_8D, UART2_STOPBITS_1, UART2_PARITY_NO,
                 UART2_SYNCMODE_CLOCK_DISABLE, UART2_MODE_TXRX_ENABLE);
+    /* Enable UART2 Receive interrupt */
+    UART2_ITConfig(UART2_IT_RXNE_OR, ENABLE);
 
     status = 0;
 
@@ -215,6 +375,13 @@ static int uart_init(uint32_t baudrate)
     return (status);
 }
 
+#ifdef BLUETOOTH
+static void bluetooth(void)
+{
+
+}
+
+#endif
 
 static char uart_putchar (char c)
 {
