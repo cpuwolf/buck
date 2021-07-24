@@ -1,4 +1,7 @@
+settings
 output
+debug
+.vscode
 *.jar
 x64
 x32
