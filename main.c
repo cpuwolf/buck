@@ -41,6 +41,14 @@
 /* Private variables ---------------------------------------------------------*/
 static uint16_t tacho_count = 0;
 static uint16_t Conversion_Value;
+static struct {
+  uint8_t buf[256];
+  uint8_t head;
+  uint8_t tail;
+  uint8_t size;
+} ringbuf;
+static uint8_t rxline[256];
+static uint8_t * prxline = rxline;
 /* Private function prototypes -----------------------------------------------*/
 static void TIM1_Config(void);
 static void TIM3_Config(void);
@@ -52,6 +60,44 @@ static void bluetooth(void);
 #endif
 static void Myloop(void);
 /* Private functions ---------------------------------------------------------*/
+static void ringbuf_init()
+{
+  memset(&ringbuf,0, sizeof(ringbuf));
+}
+static void ringbuf_put(uint8_t c)
+{
+  if(ringbuf.tail<256) {
+    ringbuf.buf[ringbuf.tail] = c;
+    ringbuf.tail++;
+  }
+  disableInterrupts();
+  ringbuf.size+=1;
+  enableInterrupts();
+  /*adjust tail*/
+  if(ringbuf.tail>=256) {
+    ringbuf.tail = 0;
+  }
+}
+static int8_t ringbuf_get(uint8_t *pc)
+{
+  int8_t ret = 0;
+  if (ringbuf.size > 0) {
+    if (ringbuf.head<256) {
+      *pc = ringbuf.buf[ringbuf.head];
+      ringbuf.head++;
+      disableInterrupts();
+      ringbuf.size-=1;
+      enableInterrupts();
+      ret = 1;
+    }
+  }
+  
+  /*adjust tail*/
+  if(ringbuf.head>=256) {
+    ringbuf.head = 0;
+  }
+  return ret;
+}
 /* Public functions ----------------------------------------------------------*/
 
 /**
@@ -255,24 +301,33 @@ static void TIM3_Config(void)
 #endif
 }
 
-static uint8_t ReceivedData[10];
-static uint8_t ReceivedData_idx = 0;
+
+
 static uint16_t GetString(void)
 {
     uint16_t val;
-    char * ptr = (char *)ReceivedData;
-    printf("RX: %s\n", ptr);
-    val = atoi(ptr);
+    uint8_t c;
+    while(ringbuf_get(&c)){
+      *prxline = c;
+      //debug: printf("%c", c);
+      prxline++;
+      if((c=='\r') || (c=='\n')){
+        *prxline = 0;
+        /*print*/
+        if(strlen(rxline)>0) {
+          printf("RX: %s\n", rxline);
+        }
+        /*reset pointer*/
+        prxline = rxline;
+      }
+    }
+    val = atoi(prxline);
     return val;
 }
 
 void uart_rx_irq(void)
 {
-    ReceivedData[ReceivedData_idx] = UART2_ReceiveData8();
-    if(ReceivedData_idx < 9)
-    {
-        ReceivedData_idx++;
-    }
+    ringbuf_put(UART2_ReceiveData8());
 }
 static void Myloop(void)
 {
@@ -284,28 +339,11 @@ static void Myloop(void)
     uint8_t i;
 read_speed:
 
-    disableInterrupts();
-    if(ReceivedData_idx > 0)
-    {
-        /* scan string */
-        for(i=0; i<=ReceivedData_idx; i++)
-        {
-            if((ReceivedData[i] == '\r')
-                    || (ReceivedData[i] == '\n'))
-            {
-                ReceivedData[i] = 0;
-                if(i > 0) {
-                    tim_val = GetString();
-                }
-                ReceivedData_idx = 0;
-                /* left input will be ignored */
-                UART2_ClearFlag(UART2_FLAG_RXNE);
-                break;
-            }
-        }
+     tim_val = GetString();
 
-    }
-    enableInterrupts();
+    
+    /* left input will be ignored */
+    //UART2_ClearFlag(UART2_FLAG_RXNE);
 
     PWM_update(tim_val);
 #if 0
