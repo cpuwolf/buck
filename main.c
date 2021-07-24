@@ -98,6 +98,29 @@ static int8_t ringbuf_get(uint8_t *pc)
   }
   return ret;
 }
+
+static int16_t GetString(void)
+{
+    int16_t val=-1;
+    uint8_t c;
+    while(ringbuf_get(&c)){
+      *prxline = c;
+      //debug: printf("%c", c);
+      prxline++;
+      if((c=='\r') || (c=='\n')){
+        *prxline = 0;
+        /*print*/
+        if(strlen(rxline)>0) {
+          printf("RX: %s\n", rxline);
+          val = atoi(rxline);
+        }
+        /*reset pointer*/
+        prxline = rxline;
+      }
+    }
+    
+    return val;
+}
 /* Public functions ----------------------------------------------------------*/
 
 /**
@@ -107,6 +130,7 @@ static int8_t ringbuf_get(uint8_t *pc)
   */
 void main(void)
 {
+    ringbuf_init();
     ADC_Config();
 
     /*heart beat led*/
@@ -302,29 +326,6 @@ static void TIM3_Config(void)
 }
 
 
-
-static uint16_t GetString(void)
-{
-    uint16_t val;
-    uint8_t c;
-    while(ringbuf_get(&c)){
-      *prxline = c;
-      //debug: printf("%c", c);
-      prxline++;
-      if((c=='\r') || (c=='\n')){
-        *prxline = 0;
-        /*print*/
-        if(strlen(rxline)>0) {
-          printf("RX: %s\n", rxline);
-        }
-        /*reset pointer*/
-        prxline = rxline;
-      }
-    }
-    val = atoi(prxline);
-    return val;
-}
-
 void uart_rx_irq(void)
 {
     ringbuf_put(UART2_ReceiveData8());
@@ -334,18 +335,18 @@ static void Myloop(void)
     uint16_t rasing_value;
     uint16_t falling_value;
     uint16_t rpm;
-    uint16_t tim_val, tim_val_old=0;
+    int16_t tim_val, tim_val_old=0;
 
     uint8_t i;
 read_speed:
 
      tim_val = GetString();
-
+     if(tim_val > 0) {
+        /* left input will be ignored */
+        //UART2_ClearFlag(UART2_FLAG_RXNE);
     
-    /* left input will be ignored */
-    //UART2_ClearFlag(UART2_FLAG_RXNE);
-
-    PWM_update(tim_val);
+        PWM_update(tim_val);
+     }
 #if 0
     /* wait a capture on CC1, CC2 */
     if((TIM1->SR2 & TIM1_FLAG_CC1) != TIM1_FLAG_CC1)
