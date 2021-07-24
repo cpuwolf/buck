@@ -197,7 +197,7 @@ static void PWM_update(uint8_t percentage)
         if(tim_val <= MAX_Val)
         {
             TIM1_SetCompare1(tim_val);
-            printf("pwm:%u\n", tim_val);
+            printf("PWM:%u\n", tim_val);
             tim_val_old = tim_val;
         }
     }
@@ -212,10 +212,11 @@ void tacho_handler(void)
 void TIM3_update(void)
 {
     uint16_t tacho = tacho_count;
-    printf("rpm:%u adc:%u\n", tacho*10, Conversion_Value);
+    printf("RPM:%u ADC:%u\n", tacho*10, Conversion_Value);
     //disableInterrupts();
     tacho_count = 0;
     //enableInterrupts();
+    /*cpuwolf: LED breathe*/
     GPIO_WriteReverse(GPIOE, GPIO_PIN_5);
     /* Cleat Interrupt Pending bit */
     TIM3_ClearITPendingBit(TIM3_IT_UPDATE);
@@ -260,6 +261,7 @@ static uint16_t GetString(void)
 {
     uint16_t val;
     char * ptr = (char *)ReceivedData;
+    printf("RX: %s\n", ptr);
     val = atoi(ptr);
     return val;
 }

@@ -49,7 +49,7 @@
         </option>
         <option>
           <name>CSpyDDFFile</name>
-          <state>$TOOLKIT_DIR$\config\ddf\iostm8.ddf</state>
+          <state>$TOOLKIT_DIR$\config\ddf\iostm8s105k4.ddf</state>
         </option>
         <option>
           <name>CSpyEnableExtraOptions</name>
