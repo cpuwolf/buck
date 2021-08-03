@@ -194,9 +194,11 @@ static uint16_t ADC_Read()
 {
 	uint16_t Conversion_Value;
 	ADC1_StartConversion();
+	//wait conversion is end
 	while(ADC1_GetFlagStatus(ADC1_FLAG_EOC)==RESET) {
 		//__wait_for_interrupt();
 	};
+	ADC1_ClearFlag(ADC1_FLAG_EOC);
 	Conversion_Value = ADC1_GetConversionValue();
 	//ADC1_ITConfig(ADC1_IT_EOC, DISABLE);
 	return Conversion_Value;
